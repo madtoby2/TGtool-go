@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MADTOBY Cloud Panel</title>
+<style>
+:root {
+  --bg: #0d1117;
+  --card: #161b22;
+  --border: #30363d;
+  --pink: #ff6b9d;
+  --cyan: #00d9ff;
+  --purple: #a855f7;
+  --green: #22c55e;
+  --amber: #f59e0b;
+  --red: #ef4444;
+  --text: #e2e8f0;
+  --muted: #6b7280;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  background: var(--bg); color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  min-height: 100vh;
+}
+header {
+  border-bottom: 1px solid var(--border);
+  padding: 16px 24px; display: flex; align-items: center; gap: 12px;
+}
+header h1 { font-size: 20px; color: var(--cyan); font-weight: 700; letter-spacing: -0.5px; }
+header .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+header .badge { font-size: 12px; color: var(--muted); background: var(--card); padding: 2px 8px; border-radius: 10px; border: 1px solid var(--border); }
+
+main { display: flex; gap: 16px; padding: 16px 24px; height: calc(100vh - 66px); }
+.panel { background: var(--card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.left { width: 280px; flex-shrink: 0; display:flex; flex-direction:column; gap:12px; }
+.center { flex:1; display:flex; flex-direction:column; gap:12px; }
+.right { width: 320px; flex-shrink: 0; }
+
+.card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+.card h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin-bottom: 12px; }
+
+.stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.stat { text-align: center; padding: 12px; border-radius: 8px; background: #0d1117; }
+.stat .num { font-size: 24px; font-weight: 700; }
+.stat .label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+.stat.online .num { color: var(--green); }
+.stat.tasks .num { color: var(--cyan); }
+.stat.sent .num { color: var(--pink); }
+.stat.filtered .num { color: var(--purple); }
+
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 16px; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--card); color: var(--text); cursor: pointer;
+  font-size: 13px; transition: all 0.15s;
+}
+.btn:hover { border-color: var(--purple); background: #1c2333; }
+.btn.primary { background: var(--purple); border-color: var(--purple); color: #fff; }
+.btn.primary:hover { background: #9333ea; }
+.btn.danger { border-color: var(--red); color: var(--red); }
+.btn.danger:hover { background: rgba(239,68,68,0.1); }
+
+input, textarea {
+  width: 100%; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border);
+  background: #0d1117; color: var(--text); font-size: 13px; outline: none;
+}
+input:focus, textarea:focus { border-color: var(--purple); }
+textarea { resize: vertical; min-height: 60px; font-family: monospace; }
+
+.tag { display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; }
+.tag.green { background: rgba(34,197,94,0.15); color: var(--green); }
+.tag.red { background: rgba(239,68,68,0.15); color: var(--red); }
+.tag.amber { background: rgba(245,158,11,0.15); color: var(--amber); }
+
+.acc-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.acc-row:last-child { border-bottom: none; }
+
+.task-row { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+.task-row:last-child { border-bottom: none; }
+
+.log-area { flex:1; overflow-y: auto; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 11px; padding: 8px; line-height: 1.6; }
+.log-line { color: var(--muted); }
+.log-line.time { color: var(--purple); }
+
+.modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 100; align-items: center; justify-content: center; }
+.modal-overlay.show { display: flex; }
+.modal { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 24px; width: 480px; max-height: 80vh; overflow-y: auto; }
+.modal h2 { font-size: 18px; margin-bottom: 16px; color: var(--cyan); }
+.modal .field { margin-bottom: 12px; }
+.modal .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.modal .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="dot" id="status-dot"></div>
+  <h1>MADTOBY Cloud</h1>
+  <span class="badge" id="status-text">connecting...</span>
+  <span style="flex:1"></span>
+  <span class="badge" id="acc-count">0 accounts</span>
+</header>
+
+<main>
+  <!-- left sidebar -->
+  <div class="left">
+    <div class="card">
+      <h3>Quick Actions</h3>
+      <div style="display:flex;flex-direction:column;gap:6px;">
+        <button class="btn primary" onclick="openModal('login')">+ Login Account</button>
+        <button class="btn" onclick="openModal('collect')">🔍 Collect Groups</button>
+        <button class="btn" onclick="openModal('send')">📨 Mass Send</button>
+        <button class="btn" onclick="openModal('clone')">🔄 Clone Channel</button>
+        <button class="btn" onclick="openModal('dm')">💬 Mass DM</button>
+        <button class="btn" onclick="openModal('invite')">👥 Invite Users</button>
+        <button class="btn" onclick="openModal('filter')">📱 Filter Phones</button>
+        <button class="btn" onclick="openModal('farm')">🤖 Farm Groups</button>
+      </div>
+    </div>
+
+    <div class="card" style="flex:1;overflow-y:auto;">
+      <h3>Accounts</h3>
+      <div id="accounts-list">no accounts</div>
+    </div>
+  </div>
+
+  <!-- center -->
+  <div class="center">
+    <div class="stats" id="stats-bar">
+      <div class="stat online"><div class="num" id="stat-online">0</div><div class="label">Online</div></div>
+      <div class="stat tasks"><div class="num" id="stat-tasks">0</div><div class="label">Tasks</div></div>
+      <div class="stat sent"><div class="num" id="stat-sent">0</div><div class="label">Sent</div></div>
+      <div class="stat filtered"><div class="num" id="stat-filtered">0</div><div class="label">Filtered</div></div>
+    </div>
+
+    <div class="card" style="flex:1;display:flex;flex-direction:column;">
+      <h3>Task Log</h3>
+      <div class="log-area" id="log-area"></div>
+    </div>
+  </div>
+
+  <!-- right sidebar -->
+  <div class="right" style="display:flex;flex-direction:column;gap:12px;">
+    <div class="card" style="flex:1;overflow-y:auto;">
+      <h3>Active Tasks</h3>
+      <div id="tasks-list">no tasks</div>
+    </div>
+  </div>
+</main>
+
+<!-- modals -->
+<div class="modal-overlay" id="modal-overlay" onclick="if(event.target===this)closeModal()">
+  <div class="modal" id="modal-content"></div>
+</div>
+
+<script>
+// ─── state ───────────────────────────────────────────────────────────
+const state = { accounts: [], tasks: {}, totalSent: 0, totalFiltered: 0 };
+let sse;
+
+function init() {
+  sse = new EventSource('/api/sse');
+  sse.onmessage = e => {
+    try { const d = JSON.parse(e.data);
+      if(d.event==='task') handleTaskEvent(d.data);
+      if(d.event==='log') addLogLine(d.data.task, d.data.msg);
+    } catch(_) {}
+  };
+  sse.onerror = () => { document.getElementById('status-dot').style.background='var(--red)'; };
+  refresh();
+  setInterval(refresh, 5000);
+}
+
+async function refresh() {
+  try {
+    const [acc, tasks, health] = await Promise.all([
+      fetch('/api/accounts').then(r=>r.json()),
+      fetch('/api/tasks').then(r=>r.json()),
+      fetch('/api/health').then(r=>r.json()),
+    ]);
+    state.accounts = acc||[];
+    renderAccounts();
+    renderTasks(tasks||[]);
+    document.getElementById('stat-online').textContent = health.accounts||0;
+    document.getElementById('stat-tasks').textContent = health.tasks||0;
+    document.getElementById('acc-count').textContent = (health.accounts||0)+' accounts';
+    document.getElementById('status-dot').style.background='var(--green)';
+    document.getElementById('status-text').textContent='connected';
+  } catch(e) {
+    document.getElementById('status-dot').style.background='var(--red)';
+    document.getElementById('status-text').textContent='offline';
+  }
+}
+
+function renderAccounts() {
+  const el = document.getElementById('accounts-list');
+  if(!state.accounts.length){el.innerHTML='<div style="color:var(--muted);font-size:12px;">no accounts</div>';return;}
+  el.innerHTML = state.accounts.map(a =>
+    `<div class="acc-row">
+      <div><span class="tag ${a.active?'green':'red'}">${a.active?'active':'off'}</span> ${a.phone}</div>
+      <button class="btn danger" style="padding:2px 8px;font-size:10px;" onclick="removeAcc('${a.phone}')">×</button>
+    </div>`
+  ).join('');
+}
+
+function renderTasks(tlist) {
+  const el = document.getElementById('tasks-list');
+  if(!tlist.length){el.innerHTML='<div style="color:var(--muted);font-size:12px;">no tasks</div>';return;}
+  el.innerHTML = tlist.slice(-20).map(t =>
+    `<div class="task-row">
+      <div>
+        <span class="tag ${t.status==='running'?'amber':t.status==='done'?'green':'red'}">${t.status}</span>
+        ${t.name}
+      </div>
+      ${t.status==='running'?`<button class="btn danger" style="padding:2px 6px;font-size:10px;" onclick="stopTask('${t.id}')">stop</button>`:''}
+    </div>`
+  ).join('');
+}
+
+function handleTaskEvent(d) {
+  state.tasks[d.id] = d;
+  if(d.status==='done') state.totalSent++;
+  document.getElementById('stat-sent').textContent = state.totalSent;
+  refresh();
+}
+
+function addLogLine(task, msg) {
+  const el = document.getElementById('log-area');
+  const div = document.createElement('div');
+  div.className = 'log-line';
+  div.textContent = msg;
+  el.appendChild(div);
+  if(el.children.length>500) el.removeChild(el.firstChild);
+  el.scrollTop = el.scrollHeight;
+}
+
+async function removeAcc(phone) {
+  await fetch('/api/accounts/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({Phone:phone})});
+  refresh();
+}
+
+async function stopTask(id) {
+  await fetch('/api/tasks/stop',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ID:id})});
+  refresh();
+}
+
+// ─── modals ──────────────────────────────────────────────────────────
+function openModal(type) {
+  const overlay = document.getElementById('modal-overlay');
+  const content = document.getElementById('modal-content');
+  const forms = {
+    login: `<h2>Login Account</h2><div class="field"><label>Phone</label><input id="f-phone" placeholder="+8613800000000"></div><div class="actions"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="doLogin()">Login</button></div>`,
+    collect: `<h2>Collect Groups</h2><div class="field"><label>Keyword</label><input id="f-kw" placeholder="crypto"></div><div class="actions"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="doCollect()">Search</button></div>`,
+    send: `<h2>Mass Send</h2><div class="field"><label>Messages (one per line)</label><textarea id="f-msgs" rows="4" placeholder="Hello&#10;Check our channel"></textarea></div><div class="actions"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="doSend()">Send</button></div>`,
+    clone: `<h2>Clone Channel</h2><div class="field"><label>Source</label><input id="f-src" placeholder="@channel_a"><div class="field"><label>Target</label><input id="f-dst" placeholder="@channel_b"><div class="actions"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="doClone()">Clone</button></div>`,
+    dm: `<h2>Mass DM</h2><div class="field"><label>Users (one per line)</label><textarea id="f-users" rows="3" placeholder="@user1&#10;@user2"></textarea><div class="field"><label>Messages</label><textarea id="f-dm-msgs" rows="3" placeholder="Hi there"></textarea><div class="actions"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="doDM()">Send</button></div>`,
+    invite: `<h2>Invite Users</h2><div class="field"><label>Users</label><textarea id="f-inv-users" rows="3" placeholder="@user1&#10;@user2"></textarea><div class="field"><label>Target Group</label><input id="f-inv-group" placeholder="@mychat"></div><div class="actions"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="doInvite()">Invite</button></div>`,
+    filter: `<h2>Filter Phones</h2><div class="field"><label>Phone Numbers (one per line)</label><textarea id="f-phones" rows="5" placeholder="+8613800000000&#10;+8613800000001"></textarea><div class="actions"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="doFilter()">Filter</button></div>`,
+    farm: `<h2>Farm Groups</h2><div class="field"><label>Messages (one per line)</label><textarea id="f-farm-msgs" rows="4" placeholder="gm&#10;nice project"></textarea><div class="field"><label>Group links</label><textarea id="f-farm-groups" rows="3" placeholder="@group1&#10;@group2"></textarea><div class="actions"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="doFarm()">Start</button></div>`,
+  };
+  content.innerHTML = forms[type]||'';
+  overlay.classList.add('show');
+}
+function closeModal(){document.getElementById('modal-overlay').classList.remove('show');}
+
+async function doLogin(){
+  const phone=document.getElementById('f-phone').value;
+  await fetch('/api/accounts/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({Phone:phone})});
+  closeModal(); refresh();
+}
+async function doCollect(){
+  const kw=document.getElementById('f-kw').value;
+  await fetch('/api/collect-query',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({Keyword:kw})});
+  closeModal(); refresh();
+}
+async function doSend(){
+  const msgs=document.getElementById('f-msgs').value.split('\n').filter(l=>l.trim());
+  await fetch('/api/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({Messages:msgs})});
+  closeModal(); refresh();
+}
+async function doClone(){
+  const src=document.getElementById('f-src').value, dst=document.getElementById('f-dst').value;
+  await fetch('/api/clone',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({Source:src,Target:dst})});
+  closeModal(); refresh();
+}
+async function doDM(){
+  const users=document.getElementById('f-users').value.split('\n').filter(l=>l.trim());
+  const msgs=document.getElementById('f-dm-msgs').value.split('\n').filter(l=>l.trim());
+  await fetch('/api/dm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({Targets:users,Messages:msgs})});
+  closeModal(); refresh();
+}
+async function doInvite(){
+  const users=document.getElementById('f-inv-users').value.split('\n').filter(l=>l.trim());
+  const group=document.getElementById('f-inv-group').value;
+  await fetch('/api/invite',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({Users:users,Group:group})});
+  closeModal(); refresh();
+}
+async function doFilter(){
+  const phones=document.getElementById('f-phones').value.split('\n').filter(l=>l.trim());
+  await fetch('/api/filter',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({Phones:phones})});
+  closeModal(); refresh();
+}
+async function doFarm(){
+  const msgs=document.getElementById('f-farm-msgs').value.split('\n').filter(l=>l.trim());
+  const groups=document.getElementById('f-farm-groups').value.split('\n').filter(l=>l.trim());
+  await fetch('/api/farm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({Scripts:msgs,Groups:groups})});
+  closeModal(); refresh();
+}
+
+init();
+</script>
+</body>
+</html>
