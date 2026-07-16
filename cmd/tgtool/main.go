@@ -1,12 +1,15 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/charmbracelet/huh"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/gotd/td/telegram"
 
 	"github.com/madtoby2/tgtool/internal/clone"
 	"github.com/madtoby2/tgtool/internal/collector"
@@ -17,482 +20,265 @@ import (
 	"github.com/madtoby2/tgtool/internal/session"
 )
 
+var ctx = context.Background()
+
+// ─── palette ────────────────────────────────────────────────────────
 var (
-	svc   = session.NewManager()
-	col   = collector.New()
-	snd   = sender.New()
-	ctx   = context.Background()
+	pink   = lipgloss.Color("#FF6B9D")
+	cyan   = lipgloss.Color("#00D9FF")
+	purple = lipgloss.Color("#A855F7")
+	green  = lipgloss.Color("#22C55E")
+	amber  = lipgloss.Color("#F59E0B")
+	red    = lipgloss.Color("#EF4444")
+	gray   = lipgloss.Color("#6B7280")
 )
 
-func banner() {
-	fmt.Println(`
-╔══════════════════════════════════════════════╗
-║          ⚡ 疾风TG营销助手 v2.0 (Go)         ║
-║          Telegram Marketing Tool             ║
-╚══════════════════════════════════════════════╝`)
-}
-
-func readInput(prompt string) string {
-	fmt.Print(prompt)
-	s, _ := bufio.NewReader(os.Stdin).ReadString('\n')
-	return strings.TrimSpace(s)
-}
-
-func readLines(path string) []string {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		fmt.Printf("文件不存在: %s\n", path)
-		return nil
-	}
-	var lines []string
-	for _, l := range strings.Split(string(data), "\n") {
-		l = strings.TrimSpace(l)
-		if l != "" {
-			lines = append(lines, l)
-		}
-	}
-	return lines
-}
-
-func listAccounts() {
-	accs := svc.List()
-	if len(accs) == 0 {
-		fmt.Println("没有已登录账号")
-		return
-	}
-	for i, a := range accs {
-		fmt.Printf("  %d. %s  @%s  %s %s\n", i+1, a.Phone, a.Username, a.FirstName, a.LastName)
-	}
-}
-
-func cmdSetup() {
-	banner()
-	fmt.Println("=== 首次配置 ===")
-	cfg := config.Load()
-
-	id := readInput(fmt.Sprintf("api_id [%d]: ", cfg.APIID))
-	if id != "" {
-		cfg.APIID, _ = strconv.Atoi(id)
-	}
-
-	hash := readInput(fmt.Sprintf("api_hash [%s...]: ", cfg.APIHash[:min(8, len(cfg.APIHash))]))
-	if hash != "" {
-		cfg.APIHash = hash
-	}
-
-	if strings.ToLower(readInput("启用代理? (y/n): ")) == "y" {
-		cfg.Proxy.Enabled = true
-		cfg.Proxy.Type = readInput("代理类型 (socks5/http) [socks5]: ")
-		if cfg.Proxy.Type == "" {
-			cfg.Proxy.Type = "socks5"
-		}
-		cfg.Proxy.Host = readInput("代理地址 [127.0.0.1]: ")
-		if cfg.Proxy.Host == "" {
-			cfg.Proxy.Host = "127.0.0.1"
-		}
-		p := readInput("端口 [1080]: ")
-		if p != "" {
-			cfg.Proxy.Port, _ = strconv.Atoi(p)
-		} else {
-			cfg.Proxy.Port = 1080
-		}
-		cfg.Proxy.Username = readInput("用户名 (可选): ")
-		if cfg.Proxy.Username != "" {
-			cfg.Proxy.Password = readInput("密码: ")
-		}
-	}
-
-	config.Save(cfg)
-	fmt.Println("配置已保存!")
-}
-
-func cmdLogin() {
-	phone := readInput("手机号 (+86xxx): ")
-	if phone == "" {
-		return
-	}
-	ctx := context.Background()
-
-	codeFunc := func() string {
-		return readInput("验证码: ")
-	}
-	passFunc := func() string {
-		return readInput("二步验证密码: ")
-	}
-
-	client, err := session.Login(ctx, phone, codeFunc, passFunc)
-	if err != nil {
-		fmt.Printf("登录失败: %v\n", err)
-		return
-	}
-	_ = client
-	fmt.Printf("账号 %s 登录成功!\n", phone)
-}
-
-func cmdCollectQuery(args []string) {
-	keyword := strings.Join(args, " ")
-	if keyword == "" {
-		keyword = readInput("关键词: ")
-	}
-	if keyword == "" {
-		return
-	}
-
-	accs := svc.List()
-	if len(accs) == 0 {
-		fmt.Println("没有可用账号")
-		return
-	}
-
-	client, err := session.Login(ctx, accs[0].Phone, nil, nil)
-	if err != nil {
-		fmt.Printf("连接失败: %v\n", err)
-		return
-	}
-
-	output := fmt.Sprintf("%s/groups_%s.txt", config.DataDir, keyword[:min(20, len(keyword))])
-	col.CollectGroupsByKeyword(ctx, client, []string{keyword}, output, 0, true, "default")
-	fmt.Printf("结果已保存到: %s\n", output)
-}
-
-func cmdCollectMembers(args []string) {
-	groupLink := ""
-	if len(args) > 0 {
-		groupLink = args[0]
-	} else {
-		groupLink = readInput("群链接: ")
-	}
-	if groupLink == "" {
-		return
-	}
-
-	accs := svc.List()
-	if len(accs) == 0 {
-		fmt.Println("没有可用账号")
-		return
-	}
-
-	client, err := session.Login(ctx, accs[0].Phone, nil, nil)
-	if err != nil {
-		fmt.Printf("连接失败: %v\n", err)
-		return
-	}
-
-	output := fmt.Sprintf("%s/members_%s.txt", config.DataDir, strings.ReplaceAll(groupLink, "/", "_")[:30])
-	col.CollectMembers(ctx, client, groupLink, output, 0, false, "default")
-	fmt.Printf("结果已保存到: %s\n", output)
-}
-
-func cmdJoin(args []string) {
-	filePath := ""
-	if len(args) > 0 {
-		filePath = args[0]
-	} else {
-		filePath = readInput("群链接文件: ")
-	}
-	links := readLines(filePath)
-	if links == nil {
-		return
-	}
-
-	accs := svc.List()
-	if len(accs) == 0 {
-		fmt.Println("没有可用账号")
-		return
-	}
-
-	mode := readInput("模式 (join/leave) [join]: ")
-	if mode == "" {
-		mode = "join"
-	}
-
-	client, err := session.Login(ctx, accs[0].Phone, nil, nil)
-	if err != nil {
-		fmt.Printf("连接失败: %v\n", err)
-		return
-	}
-
-	snd.JoinGroups(ctx, client, links, mode, 30, 60, "default")
-	fmt.Println("加群完成!")
-}
-
-func cmdSend(args []string) {
-	filePath := ""
-	if len(args) > 0 {
-		filePath = args[0]
-	} else {
-		filePath = readInput("消息文件: ")
-	}
-	msgs := readLines(filePath)
-	if msgs == nil {
-		return
-	}
-
-	accs := svc.List()
-	if len(accs) == 0 {
-		fmt.Println("没有可用账号")
-		return
-	}
-
-	client, err := session.Login(ctx, accs[0].Phone, nil, nil)
-	if err != nil {
-		fmt.Printf("连接失败: %v\n", err)
-		return
-	}
-
-	snd.SendToGroups(ctx, client, msgs, 10, 30, "", "default")
-	fmt.Println("群发完成!")
-}
-
-func cmdDM(args []string) {
-	targetFile, msgFile := "", ""
-	if len(args) >= 2 {
-		targetFile = args[0]
-		msgFile = args[1]
-	} else {
-		targetFile = readInput("目标用户文件: ")
-		msgFile = readInput("消息文件: ")
-	}
-	targets := readLines(targetFile)
-	msgs := readLines(msgFile)
-	if targets == nil || msgs == nil {
-		return
-	}
-
-	accs := svc.List()
-	if len(accs) == 0 {
-		fmt.Println("没有可用账号")
-		return
-	}
-
-	client, err := session.Login(ctx, accs[0].Phone, nil, nil)
-	if err != nil {
-		fmt.Printf("连接失败: %v\n", err)
-		return
-	}
-
-	maxPer := 30
-	if s := readInput("单账号最大发送数 [30]: "); s != "" {
-		maxPer, _ = strconv.Atoi(s)
-	}
-
-	snd.SendDM(ctx, client, targets, msgs, maxPer, 15, 30, "default")
-}
-
-func cmdInvite(args []string) {
-	userFile, groupLink := "", ""
-	if len(args) >= 2 {
-		userFile = args[0]
-		groupLink = args[1]
-	} else {
-		userFile = readInput("用户文件: ")
-		groupLink = readInput("目标群链接: ")
-	}
-	users := readLines(userFile)
-	if users == nil {
-		return
-	}
-
-	accs := svc.List()
-	if len(accs) == 0 {
-		fmt.Println("没有可用账号")
-		return
-	}
-
-	client, err := session.Login(ctx, accs[0].Phone, nil, nil)
-	if err != nil {
-		fmt.Printf("连接失败: %v\n", err)
-		return
-	}
-
-	snd.InviteUsers(ctx, client, users, groupLink, 50, 30, 60, "default")
-}
-
-func cmdFarm(args []string) {
-	scriptFile, groupFile := "", ""
-	if len(args) >= 2 {
-		scriptFile = args[0]
-		groupFile = args[1]
-	} else {
-		scriptFile = readInput("话术文件: ")
-		groupFile = readInput("群链接文件: ")
-	}
-	scripts := readLines(scriptFile)
-	groups := readLines(groupFile)
-	if scripts == nil || groups == nil {
-		return
-	}
-
-	accs := svc.List()
-	if len(accs) == 0 {
-		fmt.Println("没有可用账号")
-		return
-	}
-
-	client, err := session.Login(ctx, accs[0].Phone, nil, nil)
-	if err != nil {
-		fmt.Printf("连接失败: %v\n", err)
-		return
-	}
-
-	farming.FarmGroups(ctx, client, groups, scripts, 5, 20, 0, "default")
-}
-
-func cmdFilter(args []string) {
-	filePath := ""
-	if len(args) > 0 {
-		filePath = args[0]
-	} else {
-		filePath = readInput("手机号文件: ")
-	}
-	numbers := readLines(filePath)
-	if numbers == nil {
-		return
-	}
-
-	accs := svc.List()
-	if len(accs) == 0 {
-		fmt.Println("没有可用账号")
-		return
-	}
-
-	client, err := session.Login(ctx, accs[0].Phone, nil, nil)
-	if err != nil {
-		fmt.Printf("连接失败: %v\n", err)
-		return
-	}
-
-	output := fmt.Sprintf("%s/filtered_%d.txt", config.DataDir, len(numbers))
-	maxPer := 30
-	if s := readInput("单账号最大筛选数 [30]: "); s != "" {
-		maxPer, _ = strconv.Atoi(s)
-	}
-
-	filter.FilterPhones(ctx, client, numbers, output, maxPer, "default")
-	fmt.Printf("结果已保存到: %s\n", output)
-}
-
-func cmdClone(args []string) {
-	src, dst := "", ""
-	if len(args) >= 2 {
-		src = args[0]
-		dst = args[1]
-	} else {
-		src = readInput("源频道 (@xxx): ")
-		dst = readInput("目标频道 (@xxx): ")
-	}
-	if src == "" || dst == "" {
-		return
-	}
-
-	accs := svc.List()
-	if len(accs) == 0 {
-		fmt.Println("没有可用账号")
-		return
-	}
-
-	client, err := session.Login(ctx, accs[0].Phone, nil, nil)
-	if err != nil {
-		fmt.Printf("连接失败: %v\n", err)
-		return
-	}
-
-	limit := 0
-	if s := readInput("最大消息数 (0=无限制) [0]: "); s != "" {
-		limit, _ = strconv.Atoi(s)
-	}
-
-	mode := readInput("内容类型 (all/text/media) [all]: ")
-	useForward := strings.ToLower(readInput("转发模式? (y/n) [y]: ")) != "n"
-
-	cfg := clone.Config{
-		Source:      src,
-		Target:      dst,
-		Limit:       limit,
-		TextOnly:    mode == "text",
-		MediaOnly:   mode == "media",
-		Forward:     useForward,
-		IntervalMin: 2,
-		IntervalMax: 8,
-	}
-
-	clone.CloneChannel(ctx, client, cfg, "default")
-}
-
-func printHelp() {
-	banner()
-	fmt.Println("用法: tgtool <命令> [参数]")
-	fmt.Println()
-	fmt.Println("━━━ 账号管理 ━━━")
-	fmt.Println("  setup          - 首次配置")
-	fmt.Println("  login           - 登录账号")
-	fmt.Println("  accounts        - 列出所有账号")
-	fmt.Println("━━━ 数据采集 ━━━")
-	fmt.Println("  collect-query <关键词>  - 关键词采集群组")
-	fmt.Println("  collect-members <群链接> - 采集群成员")
-	fmt.Println("━━━ 消息群发 ━━━")
-	fmt.Println("  join      <群组文件>   - 批量加群")
-	fmt.Println("  send      <消息文件>   - 群组群发")
-	fmt.Println("  dm        <目标文件> <消息文件>  - 私信群发")
-	fmt.Println("━━━ 其他功能 ━━━")
-	fmt.Println("  invite    <用户文件> <群链接>  - 批量邀请")
-	fmt.Println("  farm      <话术文件> <群链接>  - 炒群")
-	fmt.Println("  filter    <手机号文件>         - 筛号")
-	fmt.Println("  clone     <源频道> <目标频道>   - 复刻频道消息")
-	fmt.Println("━━━ 系统 ━━━")
-	fmt.Println("  config            - 查看配置")
-}
+var (
+	svc = session.NewManager()
+	col = collector.New()
+	snd = sender.New()
+)
 
 func main() {
-	if len(os.Args) < 2 {
-		printHelp()
-		return
-	}
-
-	cmd := os.Args[1]
-	args := os.Args[2:]
-
-	switch cmd {
-	case "help", "-h", "--help":
-		printHelp()
-	case "setup":
-		cmdSetup()
-	case "login":
-		cmdLogin()
-	case "accounts":
-		listAccounts()
-	case "collect-query":
-		cmdCollectQuery(args)
-	case "collect-members":
-		cmdCollectMembers(args)
-	case "join":
-		cmdJoin(args)
-	case "send":
-		cmdSend(args)
-	case "dm":
-		cmdDM(args)
-	case "invite":
-		cmdInvite(args)
-	case "farm":
-		cmdFarm(args)
-	case "filter":
-		cmdFilter(args)
-	case "clone":
-		cmdClone(args)
-	case "config":
-		cfg := config.Load()
-		cfg.APIHash = cfg.APIHash[:min(8, len(cfg.APIHash))] + "***"
-		fmt.Printf("api_id: %d\napi_hash: %s\nproxy: %s://%s:%d\n",
-			cfg.APIID, cfg.APIHash, cfg.Proxy.Type, cfg.Proxy.Host, cfg.Proxy.Port)
-	default:
-		fmt.Printf("未知命令: %s\n", cmd)
-		printHelp()
+	if len(os.Args) < 2 { showMenu(); return }
+	switch os.Args[1] {
+	case "setup": runSetup()
+	case "login": runLogin()
+	case "accounts": runAccounts()
+	case "config": runConfig()
+	case "collect-query": runCollectQuery(os.Args[2:])
+	case "collect-members": runCollectMembers(os.Args[2:])
+	case "join": runJoin(os.Args[2:])
+	case "send": runSend(os.Args[2:])
+	case "dm": runDM(os.Args[2:])
+	case "invite": runInvite(os.Args[2:])
+	case "farm": runFarm(os.Args[2:])
+	case "filter": runFilter(os.Args[2:])
+	case "clone": runClone(os.Args[2:])
+	default: showMenu()
 	}
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
+// ─── helpers ────────────────────────────────────────────────────────
+func header() string {
+	name := lipgloss.NewStyle().Bold(true).Foreground(cyan).Render("▎ MADTOBY")
+	sub  := lipgloss.NewStyle().Foreground(gray).Render("telegram automation toolkit")
+	b := lipgloss.NewStyle().Border(lipgloss.DoubleBorder(), true, false).
+		BorderForeground(pink).Padding(0, 1)
+	return b.Render(name + "\n" + sub)
+}
+func ok(s string)   { fmt.Println(lipgloss.NewStyle().Foreground(green).Render("✓ " + s)) }
+func fail(s string) { fmt.Println(lipgloss.NewStyle().Foreground(red).Render("✗ " + s)) }
+func info(s string) { fmt.Println(lipgloss.NewStyle().Foreground(amber).Render("→ " + s)) }
+func ask(label string) string {
+	var v string
+	huh.NewInput().Title(label).Value(&v).Run()
+	return strings.TrimSpace(v)
+}
+func readLines(path string) []string {
+	data, err := os.ReadFile(path)
+	if err != nil { fail("file not found: " + path); return nil }
+	var out []string
+	for _, l := range strings.Split(string(data), "\n") {
+		if l = strings.TrimSpace(l); l != "" { out = append(out, l) }
 	}
-	return b
+	return out
+}
+func getClient() *telegram.Client {
+	accs := svc.List()
+	if len(accs) == 0 { fail("no accounts — run login first"); return nil }
+	c, err := session.Login(ctx, accs[0].Phone, nil, nil)
+	if err != nil { fail("connect failed: " + err.Error()); return nil }
+	return c
+}
+func sanitize(s string) string {
+	r := strings.NewReplacer("@","","/","_","\\","_",":","_"," ","_","?","")
+	s = r.Replace(s)
+	if len(s) > 30 { s = s[:30] }
+	return s
+}
+
+// ─── menu ───────────────────────────────────────────────────────────
+func showMenu() {
+	fmt.Println(header())
+	sections := []struct{ title string; items []string }{
+		{"Account", []string{
+			"  setup     configure api credentials",
+			"  login     login telegram account",
+			"  accounts  list all accounts",
+		}},
+		{"Collection", []string{
+			"  collect-query      search groups by keyword",
+			"  collect-members    scrape group members",
+		}},
+		{"Messaging", []string{
+			"  join    batch join / leave groups",
+			"  send    mass message to groups",
+			"  dm      mass private messages",
+		}},
+		{"Tools", []string{
+			"  invite  invite users to group",
+			"  farm    simulate group activity",
+			"  filter  phone number screening",
+			"  clone   mirror channel content",
+		}},
+	}
+	for _, s := range sections {
+		title := lipgloss.NewStyle().Bold(true).Foreground(cyan).Render(s.title)
+		body  := strings.Join(s.items, "\n")
+		box   := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).
+			BorderForeground(purple).Padding(1, 2).Width(50).
+			Render(title + "\n\n" + body)
+		fmt.Println(box)
+		fmt.Println()
+	}
+	fmt.Println(lipgloss.NewStyle().Foreground(gray).Render("tgtool v2.0  •  madtoby"))
+}
+
+// ─── commands ───────────────────────────────────────────────────────
+func runSetup() {
+	fmt.Println(header())
+	cfg := config.Load()
+	if s := ask("API ID"); s != "" { cfg.APIID, _ = strconv.Atoi(s) }
+	if s := ask("API Hash"); s != "" { cfg.APIHash = s }
+	if strings.ToLower(ask("Enable proxy? (y/n)")) == "y" {
+		cfg.Proxy.Enabled = true
+		cfg.Proxy.Type = ask("Proxy type (socks5/http)")
+		if cfg.Proxy.Type == "" { cfg.Proxy.Type = "socks5" }
+		cfg.Proxy.Host = ask("Proxy host")
+		cfg.Proxy.Port, _ = strconv.Atoi(ask("Proxy port"))
+	}
+	if err := config.Save(cfg); err != nil { fail("save failed"); return }
+	ok("configuration saved")
+}
+
+func runLogin() {
+	phone := ask("Phone number (+86xxx)")
+	if phone == "" { fail("phone required"); return }
+	ok("sending code to " + phone)
+	if _, err := session.Login(ctx, phone,
+		func() string { return ask("Verification code") },
+		func() string { return ask("2FA password (if any)") },
+	); err != nil { fail("login failed: " + err.Error()); return }
+	ok("logged in: " + phone)
+}
+
+func runAccounts() {
+	fmt.Println(header())
+	for _, a := range svc.List() {
+		dot := lipgloss.NewStyle().Foreground(green).Render("●")
+		if !a.IsActive { dot = lipgloss.NewStyle().Foreground(red).Render("○") }
+		fmt.Printf("  %s  %-20s  @%-15s  %s %s\n",
+			dot, a.Phone, a.Username, a.FirstName, a.LastName)
+	}
+}
+
+func runConfig() {
+	cfg := config.Load()
+	h := cfg.APIHash
+	if len(h) > 8 { h = h[:8] + "***" }
+	fmt.Println(header())
+	fmt.Printf("  api_id:  %d\n  api_hash: %s\n  proxy:   %s://%s:%d\n",
+		cfg.APIID, h, cfg.Proxy.Type, cfg.Proxy.Host, cfg.Proxy.Port)
+}
+
+func runCollectQuery(args []string) {
+	kw := strings.Join(args, " ")
+	if kw == "" { kw = ask("Search keyword") }
+	if kw == "" { return }
+	c := getClient(); if c == nil { return }
+	out := config.DataDir + "/groups_" + sanitize(kw) + ".txt"
+	info("searching: " + kw)
+	col.CollectGroupsByKeyword(ctx, c, []string{kw}, out, 0, true, "default")
+	ok("saved → " + out)
+}
+
+func runCollectMembers(args []string) {
+	link := ""; if len(args) > 0 { link = args[0] } else { link = ask("Group @username") }
+	if link == "" { return }
+	c := getClient(); if c == nil { return }
+	out := config.DataDir + "/members_" + sanitize(link) + ".txt"
+	info("collecting from " + link)
+	col.CollectMembers(ctx, c, link, out, 0, false, "default")
+	ok("saved → " + out)
+}
+
+func runJoin(args []string) {
+	path := ""; if len(args) > 0 { path = args[0] } else { path = ask("Group links file") }
+	links := readLines(path); if links == nil { return }
+	c := getClient(); if c == nil { return }
+	mode := ask("Mode (join/leave)"); if mode == "" { mode = "join" }
+	snd.JoinGroups(ctx, c, links, mode, 30, 60, "default")
+	ok("done")
+}
+
+func runSend(args []string) {
+	path := ""; if len(args) > 0 { path = args[0] } else { path = ask("Messages file") }
+	msgs := readLines(path); if msgs == nil { return }
+	c := getClient(); if c == nil { return }
+	info("sending to joined groups...")
+	snd.SendToGroups(ctx, c, msgs, 10, 30, "", "default")
+}
+
+func runDM(args []string) {
+	tf, mf := "", ""
+	if len(args) >= 2 { tf, mf = args[0], args[1] } else {
+		tf = ask("Target users file"); mf = ask("Messages file")
+	}
+	targets, msgs := readLines(tf), readLines(mf)
+	if targets == nil || msgs == nil { return }
+	c := getClient(); if c == nil { return }
+	limit := 30
+	if s := ask("Max per account"); s != "" { limit, _ = strconv.Atoi(s) }
+	snd.SendDM(ctx, c, targets, msgs, limit, 15, 30, "default")
+}
+
+func runInvite(args []string) {
+	uf, gl := "", ""
+	if len(args) >= 2 { uf, gl = args[0], args[1] } else {
+		uf = ask("Users file"); gl = ask("Target group @username")
+	}
+	users := readLines(uf); if users == nil { return }
+	c := getClient(); if c == nil { return }
+	snd.InviteUsers(ctx, c, users, gl, 50, 30, 60, "default")
+}
+
+func runFarm(args []string) {
+	sf, gf := "", ""
+	if len(args) >= 2 { sf, gf = args[0], args[1] } else {
+		sf = ask("Script file"); gf = ask("Group links file")
+	}
+	scripts, groups := readLines(sf), readLines(gf)
+	if scripts == nil || groups == nil { return }
+	c := getClient(); if c == nil { return }
+	farming.FarmGroups(ctx, c, groups, scripts, 5, 20, 0, "default")
+}
+
+func runFilter(args []string) {
+	path := ""; if len(args) > 0 { path = args[0] } else { path = ask("Phone numbers file") }
+	nums := readLines(path); if nums == nil { return }
+	c := getClient(); if c == nil { return }
+	out := fmt.Sprintf("%s/filtered_%d.txt", config.DataDir, len(nums))
+	limit := 30
+	if s := ask("Max per account"); s != "" { limit, _ = strconv.Atoi(s) }
+	filter.FilterPhones(ctx, c, nums, out, limit, "default")
+	ok("saved → " + out)
+}
+
+func runClone(args []string) {
+	src, dst := "", ""
+	if len(args) >= 2 { src, dst = args[0], args[1] } else {
+		src = ask("Source channel (@username)")
+		dst = ask("Target channel (@username)")
+	}
+	if src == "" || dst == "" { return }
+	c := getClient(); if c == nil { return }
+	limit := 0
+	if s := ask("Max messages (0=unlimited)"); s != "" { limit, _ = strconv.Atoi(s) }
+	mode := ask("Content type (all/text/media)"); if mode == "" { mode = "all" }
+	forward := strings.ToLower(ask("Forward mode? (y/n)")) != "n"
+	cfg := clone.Config{Source: src, Target: dst, Limit: limit,
+		TextOnly: mode == "text", MediaOnly: mode == "media",
+		Forward: forward, IntervalMin: 2, IntervalMax: 8}
+	clone.CloneChannel(ctx, c, cfg, "default")
 }
