@@ -1,0 +1,5 @@
+*.exe
+tgtool-setup-*.exe
+sessions/
+data/
+logs/
